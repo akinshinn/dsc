@@ -1,0 +1,113 @@
+(* FEM 2D - Visualization for Lab 1 *)
+(* Run this notebook after executing fem2d.cpp *)
+
+(* Import data *)
+SetDirectory[NotebookDirectory[]];
+Get["task1_data.m"];
+task1Num = numSolution;
+task1Exact = exactSolution;
+task1Error = errorData;
+
+Get["task2_data.m"];
+task2Num = numSolution;
+task2Exact = exactSolution;
+task2Error = errorData;
+
+(* === Task 1: u = x^2 - y^2 + 2 === *)
+
+task1Plots = {
+    ListPlot3D[task1Num, 
+        PlotLabel -> Style["Numerical Solution", 14, Bold],
+        AxesLabel -> {"x", "y", "u"},
+        ColorFunction -> "Rainbow",
+        Mesh -> None,
+        PlotRange -> All],
+    
+    ListPlot3D[task1Exact,
+        PlotLabel -> Style["Exact Solution", 14, Bold],
+        AxesLabel -> {"x", "y", "u"},
+        ColorFunction -> "Rainbow", 
+        Mesh -> None,
+        PlotRange -> All],
+    
+    ListPlot3D[task1Error,
+        PlotLabel -> Style["Error Distribution", 14, Bold],
+        AxesLabel -> {"x", "y", "error"},
+        ColorFunction -> "TemperatureMap",
+        Mesh -> None,
+        PlotRange -> All]
+};
+
+Print[Style["Task 1: u = x\[Superscript]2 - y\[Superscript]2 + 2, \[Lambda] = 1", 16, Bold]];
+GraphicsGrid[{task1Plots[[1;;2]], {task1Plots[[3]], SpanFromLeft}}, 
+    ImageSize -> 800, Spacings -> 10]
+
+(* === Task 2: u = sin(5(x+y)) + 2 === *)
+
+task2Plots = {
+    ListPlot3D[task2Num,
+        PlotLabel -> Style["Numerical Solution", 14, Bold],
+        AxesLabel -> {"x", "y", "u"},
+        ColorFunction -> "Rainbow",
+        Mesh -> None,
+        PlotRange -> All],
+    
+    ListPlot3D[task2Exact,
+        PlotLabel -> Style["Exact Solution", 14, Bold],
+        AxesLabel -> {"x", "y", "u"},
+        ColorFunction -> "Rainbow",
+        Mesh -> None,
+        PlotRange -> All],
+    
+    ListPlot3D[task2Error,
+        PlotLabel -> Style["Error Distribution", 14, Bold],
+        AxesLabel -> {"x", "y", "error"},
+        ColorFunction -> "TemperatureMap",
+        Mesh -> None,
+        PlotRange -> All]
+};
+
+Print[Style["Task 2: u = sin(5(x+y)) + 2, \[Lambda] = x + y", 16, Bold]];
+GraphicsGrid[{task2Plots[[1;;2]], {task2Plots[[3]], SpanFromLeft}},
+    ImageSize -> 800, Spacings -> 10]
+
+(* === Convergence Analysis === *)
+
+convergenceData1 = {
+    {0.2, 1.55*^-1},
+    {0.1, 7.37*^-2},
+    {0.05, 3.65*^-2},
+    {0.025, 1.82*^-2}
+};
+
+convergenceData2 = {
+    {0.2, 7.15*^-1},
+    {0.1, 1.79*^-1},
+    {0.05, 4.74*^-2},
+    {0.025, 1.68*^-2}
+};
+
+convergencePlot = Show[
+    ListLogLogPlot[{convergenceData1, convergenceData2},
+        PlotStyle -> {Blue, Red},
+        PlotMarkers -> {{\[FilledCircle], 12}, {\[FilledSquare], 12}},
+        PlotLegends -> {"Task 1", "Task 2"},
+        AxesLabel -> {"h (mesh size)", "Max Error"},
+        PlotLabel -> Style["Convergence Analysis", 16, Bold],
+        GridLines -> Automatic,
+        ImageSize -> 500],
+    LogLogPlot[{0.5 h, 2 h^2}, {h, 0.01, 0.3},
+        PlotStyle -> {{Gray, Dashed}, {Gray, Dotted}},
+        PlotLegends -> {"O(h)", "O(h\[Superscript]2)"}]
+];
+
+Print[Style["Convergence Analysis", 16, Bold]];
+convergencePlot
+
+(* Summary table *)
+Print[Style["\nSummary:", 14, Bold]];
+Grid[{
+    {"Task", "Solution", "\[Lambda](x,y)", "Max Error (N=40)"},
+    {"1", "x\[Superscript]2 - y\[Superscript]2 + 2", "1", "1.82\[Times]10\[Superscript]-2"},
+    {"2", "sin(5(x+y)) + 2", "x + y", "1.68\[Times]10\[Superscript]-2"}
+}, Frame -> All, Background -> {None, {LightGray, None, None}}]
