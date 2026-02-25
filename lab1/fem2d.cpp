@@ -60,43 +60,48 @@ public:
     void set(int i, int j, double val) { data[{i, j}] = val; }
 };
 
-// ============== Решатель СЛАУ ==============
+// ============== Решатель СЛАУ (метод Гаусса) ==============
 
-double dot(const vector<double>& a, const vector<double>& b) {
-    double s = 0;
-    for (size_t i = 0; i < a.size(); i++) s += a[i] * b[i];
-    return s;
-}
-
-vector<double> multiply(const SparseMatrix& A, const vector<double>& x) {
-    vector<double> y(A.n, 0.0);
-    for (auto& [idx, val] : A.data)
-        y[idx.first] += val * x[idx.second];
-    return y;
-}
-
-vector<double> solveCG(const SparseMatrix& A, const vector<double>& b) {
+vector<double> solveGauss(SparseMatrix& A, vector<double> b) {
     int n = A.n;
-    vector<double> x(n, 0.0), r = b, p = r;
-    double rsold = dot(r, r);
     
-    for (int iter = 0; iter < 100000; iter++) {
-        vector<double> Ap = multiply(A, p);
-        double alpha = rsold / dot(p, Ap);
+    // Преобразуем в плотную матрицу
+    vector<vector<double>> M(n, vector<double>(n, 0.0));
+    for (auto& [idx, val] : A.data)
+        M[idx.first][idx.second] = val;
+    
+    // Прямой ход с выбором главного элемента
+    for (int k = 0; k < n; k++) {
+        // Поиск максимального элемента в столбце
+        int maxRow = k;
+        for (int i = k + 1; i < n; i++)
+            if (abs(M[i][k]) > abs(M[maxRow][k]))
+                maxRow = i;
         
-        for (int i = 0; i < n; i++) {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * Ap[i];
+        swap(M[k], M[maxRow]);
+        swap(b[k], b[maxRow]);
+        
+        if (abs(M[k][k]) < 1e-12) continue;
+        
+        // Обнуление элементов под главной диагональю
+        for (int i = k + 1; i < n; i++) {
+            double factor = M[i][k] / M[k][k];
+            for (int j = k; j < n; j++)
+                M[i][j] -= factor * M[k][j];
+            b[i] -= factor * b[k];
         }
-        
-        double rsnew = dot(r, r);
-        if (sqrt(rsnew) < 1e-10) break;
-        
-        for (int i = 0; i < n; i++)
-            p[i] = r[i] + (rsnew / rsold) * p[i];
-        
-        rsold = rsnew;
     }
+    
+    // Обратный ход
+    vector<double> x(n, 0.0);
+    for (int i = n - 1; i >= 0; i--) {
+        if (abs(M[i][i]) < 1e-12) continue;
+        x[i] = b[i];
+        for (int j = i + 1; j < n; j++)
+            x[i] -= M[i][j] * x[j];
+        x[i] /= M[i][i];
+    }
+    
     return x;
 }
 
@@ -147,8 +152,32 @@ void assemble(const Mesh& mesh,
 
 // ============== Граничные условия ==============
 
-void applyNeumann(const Mesh& mesh, const vector<BoundaryCondition>& bcs,
-                  vector<double>& F, function<double(double,double)> q) {
+// BC1 - краевое условие 1-го рода (Дирихле): u = g на границе
+void BC1(SparseMatrix& K, vector<double>& F, const vector<pair<int, double>>& dirichlet) {
+    map<int, double> fixed(dirichlet.begin(), dirichlet.end());
+    
+    for (auto& [idx, val] : K.data) {
+        int i = idx.first, j = idx.second;
+        if (fixed.count(j) && !fixed.count(i))
+            F[i] -= val * fixed[j];
+    }
+    
+    vector<pair<int,int>> toRemove;
+    for (auto& [idx, val] : K.data)
+        if (fixed.count(idx.first) || fixed.count(idx.second))
+            toRemove.push_back(idx);
+    for (auto& idx : toRemove)
+        K.data.erase(idx);
+    
+    for (auto& [node, val] : fixed) {
+        K.set(node, node, 1.0);
+        F[node] = val;
+    }
+}
+
+// BC2 - краевое условие 2-го рода (Нейман): -lambda * du/dn = theta на границе
+void BC2(const Mesh& mesh, const vector<BoundaryCondition>& bcs,
+         vector<double>& F, function<double(double,double)> theta) {
     
     map<int, bool> neumannNodes;
     for (auto& bc : bcs) 
@@ -171,32 +200,9 @@ void applyNeumann(const Mesh& mesh, const vector<BoundaryCondition>& bcs,
         double xj = mesh.nodes[j].x, yj = mesh.nodes[j].y;
         double L = sqrt((xj - xi) * (xj - xi) + (yj - yi) * (yj - yi));
         
-        double qi = q(xi, yi), qj = q(xj, yj);
+        double qi = theta(xi, yi), qj = theta(xj, yj);
         F[i] -= L * (2 * qi + qj) / 6.0;
         F[j] -= L * (qi + 2 * qj) / 6.0;
-    }
-}
-
-void applyDirichlet(SparseMatrix& K, vector<double>& F,
-                    const vector<pair<int, double>>& dirichlet) {
-    map<int, double> fixed(dirichlet.begin(), dirichlet.end());
-    
-    for (auto& [idx, val] : K.data) {
-        int i = idx.first, j = idx.second;
-        if (fixed.count(j) && !fixed.count(i))
-            F[i] -= val * fixed[j];
-    }
-    
-    vector<pair<int,int>> toRemove;
-    for (auto& [idx, val] : K.data)
-        if (fixed.count(idx.first) || fixed.count(idx.second))
-            toRemove.push_back(idx);
-    for (auto& idx : toRemove)
-        K.data.erase(idx);
-    
-    for (auto& [node, val] : fixed) {
-        K.set(node, node, 1.0);
-        F[node] = val;
     }
 }
 
@@ -206,16 +212,16 @@ struct Task1 {
     static double lambda(double, double) { return 1.0; }
     static double f(double, double) { return 0.0; }
     static double exact(double x, double y) { return x * x - y * y + 2.0; }
-    static double neumann(double, double y) { return 2.0 * y; }
+    static double theta(double, double y) { return 2.0 * y; }  // -lambda * du/dn на границе Неймана
     
     static vector<BoundaryCondition> getBCs(const Mesh& m) {
         vector<BoundaryCondition> bcs;
         for (int i = 0; i < (int)m.nodes.size(); i++) {
             double x = m.nodes[i].x, y = m.nodes[i].y;
             if (abs(x) < 1e-10 || abs(x - 1) < 1e-10 || abs(y) < 1e-10)
-                bcs.push_back({i, 1, x, y});
+                bcs.push_back({i, 1, x, y});  // BC1 - Дирихле
             else if (abs(y - 1) < 1e-10)
-                bcs.push_back({i, 2, x, y});
+                bcs.push_back({i, 2, x, y});  // BC2 - Нейман
         }
         return bcs;
     }
@@ -228,16 +234,16 @@ struct Task2 {
         return -10.0 * cos(5.0 * s) + 50.0 * s * sin(5.0 * s);
     }
     static double exact(double x, double y) { return sin(5.0 * (x + y)) + 2.0; }
-    static double neumann(double x, double y) { return -(x + y) * 5.0 * cos(5.0 * (x + y)); }
+    static double theta(double x, double y) { return -(x + y) * 5.0 * cos(5.0 * (x + y)); }  // -lambda * du/dn
     
     static vector<BoundaryCondition> getBCs(const Mesh& m) {
         vector<BoundaryCondition> bcs;
         for (int i = 0; i < (int)m.nodes.size(); i++) {
             double x = m.nodes[i].x, y = m.nodes[i].y;
             if (abs(x) < 1e-10 || abs(y) < 1e-10)
-                bcs.push_back({i, 1, x, y});
+                bcs.push_back({i, 1, x, y});  // BC1 - Дирихле
             else if (abs(x - 1) < 1e-10 || abs(y - 1) < 1e-10)
-                bcs.push_back({i, 2, x, y});
+                bcs.push_back({i, 2, x, y});  // BC2 - Нейман
         }
         return bcs;
     }
@@ -256,15 +262,15 @@ double solve(int nx, vector<double>* solution = nullptr, Mesh* outMesh = nullptr
     assemble(mesh, Task::lambda, Task::f, K, F);
     
     auto bcs = Task::getBCs(mesh);
-    applyNeumann(mesh, bcs, F, Task::neumann);
+    BC2(mesh, bcs, F, Task::theta);
     
     vector<pair<int, double>> dirichlet;
     for (auto& bc : bcs)
         if (bc.type == 1)
             dirichlet.push_back({bc.node, Task::exact(bc.x, bc.y)});
-    applyDirichlet(K, F, dirichlet);
+    BC1(K, F, dirichlet);
     
-    vector<double> u = solveCG(K, F);
+    vector<double> u = solveGauss(K, F);
     
     if (solution) *solution = u;
     if (outMesh) *outMesh = mesh;
