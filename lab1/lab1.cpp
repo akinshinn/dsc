@@ -11,18 +11,13 @@
 #include <stdexcept>
 #include <locale>
 
-// ================================================================
-// Выбор задачи: задайте номер здесь или передайте -DTASK=2 компилятору
-// ================================================================
-#ifndef TASK
+#ifndef TASK // Немного ГПТ стиль
 #  define TASK 2
 #endif
-// ================================================================
 
-// ---- структуры сетки ----
 
 struct Node { double x, y; };
-struct Element { std::array<int, 3> n; };
+struct Element { std::array<int, 3> n; }; // Я бы сделал здесь вектора, а то немного гпт выдает
 struct BC { int node, type; double x, y; };
 
 struct Mesh {
@@ -69,7 +64,6 @@ double u_dir(double x, double y) { return u_exact(x, y); }
 // -(lambda * du/dn):
 //   верхняя грань y=d=1: нормаль (0,+1), du/dn = du/dy = -2y => q = -(-2y) = 2y
 double q_neu(double x, double y) {
-    (void)x;
     return 2.0 * y;   // используется только на верхней грани y=1 => 2*1 = 2
 }
 
@@ -77,7 +71,7 @@ std::vector<BC> boundary_table(const Mesh& m,
     double a, double b, double c, double d, double tol = 1e-10)
 {
     std::vector<BC> bcs;
-    for (int i = 0; i < (int)m.nodes.size(); ++i) {
+    for (int i = 0; i < m.nodes.size(); ++i) {
         double x = m.nodes[i].x, y = m.nodes[i].y;
         bool left = std::abs(x - a) < tol;
         bool right = std::abs(x - b) < tol;
@@ -86,7 +80,7 @@ std::vector<BC> boundary_table(const Mesh& m,
         if (left)   bcs.push_back({ i, 1, x, y });
         else if (right)  bcs.push_back({ i, 1, x, y });
         else if (bottom) bcs.push_back({ i, 1, x, y });
-        else if (top)    bcs.push_back({ i, 2, x, y });  // Нейман
+        else if (top)    bcs.push_back({ i, 2, x, y });
     }
     return bcs;
 }
@@ -118,8 +112,7 @@ constexpr double TEST_TOL = 5e-2;
 double lambda_(double x, double y) { return x + y; }
 
 double q_src(double x, double y) {
-    double s = x + y;
-    return -20.0 * std::cos(5.0 * s) + 50.0 * s * std::sin(5.0 * s);
+    return -20.0 * std::cos(5.0 * (x + y)) + 50.0 * (x + y) * std::sin(5.0 * (x + y));
 }
 
 double u_exact(double x, double y) { return std::sin(5.0 * (x + y)) + 2.0; }
@@ -137,16 +130,16 @@ std::vector<BC> boundary_table(const Mesh& m,
     double a, double b, double c, double d, double tol = 1e-10)
 {
     std::vector<BC> bcs;
-    for (int i = 0; i < (int)m.nodes.size(); ++i) {
+    for (int i = 0; i < m.nodes.size(); ++i) {
         double x = m.nodes[i].x, y = m.nodes[i].y;
         bool left = std::abs(x - a) < tol;
         bool right = std::abs(x - b) < tol;
         bool bottom = std::abs(y - c) < tol;
         bool top = std::abs(y - d) < tol;
-        if (left)   bcs.push_back({ i, 1, x, y });  // Дирихле
-        else if (right)  bcs.push_back({ i, 2, x, y });  // Нейман
-        else if (bottom) bcs.push_back({ i, 1, x, y });  // Дирихле
-        else if (top)    bcs.push_back({ i, 2, x, y });  // Нейман
+        if (left)   bcs.push_back({ i, 1, x, y });
+        else if (right)  bcs.push_back({ i, 2, x, y });
+        else if (bottom) bcs.push_back({ i, 1, x, y });
+        else if (top)    bcs.push_back({ i, 2, x, y });
     }
     return bcs;
 }
@@ -165,9 +158,9 @@ constexpr double TEST_TOL = 1e-1;
 struct DokMatrix {
     int n;
     std::map<std::pair<int, int>, double> data;
-    explicit DokMatrix(int sz) : n(sz) {}
-    void add(int i, int j, double v) { data[{i, j}] += v; }
-    void set(int i, int j, double v) { data[{i, j}] = v; }
+    explicit DokMatrix(int sz) : n(sz) {} // Как будто очень ГПТ штука
+    void add(int i, int j, double v) { data[{i, j}] += v; } // Тоже
+    void set(int i, int j, double v) { data[{i, j}] = v; } // Тоже
     double get(int i, int j) const {
         auto it = data.find({ i,j });
         return it != data.end() ? it->second : 0.0;
@@ -252,7 +245,7 @@ Ke local_matrix(const std::array<Node, 3>& p,
     double S = std::abs(D) / 2.0;
     if (S < 1e-15) return ke;
 
-    double b[3] = { (y2 - y3) / D,(y3 - y1) / D,(y1 - y2) / D };
+    double b[3] = { (y2 - y3) / D,(y3 - y1) / D,(y1 - y2) / D }; // А откуда формулы?
     double c[3] = { (x3 - x2) / D,(x1 - x3) / D,(x2 - x1) / D };
     double la = (lam[0] + lam[1] + lam[2]) / 3.0;
     double qa = (q[0] + q[1] + q[2]) / 3.0;
