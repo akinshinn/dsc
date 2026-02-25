@@ -7,19 +7,8 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
-#include <sstream>
 #include <stdexcept>
-#include <locale>
-
-// ================================================================
-// Выбор задачи: задайте номер здесь или передайте -DTASK=2 компилятору
-// ================================================================
-#ifndef TASK
-#  define TASK 2
-#endif
-// ================================================================
-
-// ---- структуры сетки ----
+#include <string>
 
 struct Node { double x, y; };
 struct Element { std::array<int, 3> n; };
@@ -37,208 +26,148 @@ Mesh make_mesh(double a, double b, double c, double d, int nx, int ny)
     for (int j = 0; j <= ny; ++j)
         for (int i = 0; i <= nx; ++i)
             m.nodes[j * (nx + 1) + i] = { a + i * (b - a) / nx, c + j * (d - c) / ny };
-
     for (int j = 0; j < ny; ++j)
         for (int i = 0; i < nx; ++i) {
             int n0 = j * (nx + 1) + i, n1 = n0 + 1, n2 = n0 + (nx + 1), n3 = n2 + 1;
-            m.elems.push_back({ {n0,n1,n3} });
-            m.elems.push_back({ {n0,n3,n2} });
+            m.elems.push_back({ {n0, n1, n3} });
+            m.elems.push_back({ {n0, n3, n2} });
         }
     return m;
 }
 
-// ================================================================
-// ЗАДАЧА 1
-//   lambda = 1, q = 0
-//   u_exact = x^2 - y^2 + 2
-//
-//   ГУ по граням:
-//     x=a=0 (левая):  тип 1,  u = -y^2 + 2
-//     x=b=1 (правая): тип 1,  u = 1 - y^2 + 2
-//     y=c=0 (нижняя): тип 1,  u = x^2 + 2
-//     y=d=1 (верхняя):тип 2,  -(du/dy) = 2y|_{y=1} = 2
-// ================================================================
+struct TaskDef {
+    std::string name;
+    std::string bc_left, bc_right, bc_bot, bc_top;
+    std::function<double(double, double)> lambda;
+    std::function<double(double, double)> q_src;
+    std::function<double(double, double)> u_exact;
+    std::function<double(double, double)> q_neu;
+    std::function<std::vector<BC>(const Mesh&, double, double, double, double)> boundary_table;
+    double test_tol;
+    int test_nx, test_ny;
+};
 
-#if TASK == 1
-
-double lambda_(double, double) { return 1.0; }
-double q_src(double, double) { return 0.0; }
-double u_exact(double x, double y) { return x * x - y * y + 2.0; }
-double u_dir(double x, double y) { return u_exact(x, y); }
-
-// -(lambda * du/dn):
-//   верхняя грань y=d=1: нормаль (0,+1), du/dn = du/dy = -2y => q = -(-2y) = 2y
-double q_neu(double x, double y) {
-    (void)x;
-    return 2.0 * y;   // используется только на верхней грани y=1 => 2*1 = 2
-}
-
-std::vector<BC> boundary_table(const Mesh& m,
-    double a, double b, double c, double d, double tol = 1e-10)
+// Задача 1: -div(grad u) = 0,  u = x^2 - y^2 + 2
+TaskDef make_task1()
 {
-    std::vector<BC> bcs;
-    for (int i = 0; i < (int)m.nodes.size(); ++i) {
-        double x = m.nodes[i].x, y = m.nodes[i].y;
-        bool left = std::abs(x - a) < tol;
-        bool right = std::abs(x - b) < tol;
-        bool bottom = std::abs(y - c) < tol;
-        bool top = std::abs(y - d) < tol;
-        if (left)   bcs.push_back({ i, 1, x, y });
-        else if (right)  bcs.push_back({ i, 1, x, y });
-        else if (bottom) bcs.push_back({ i, 1, x, y });
-        else if (top)    bcs.push_back({ i, 2, x, y });  // Нейман
-    }
-    return bcs;
+    TaskDef t;
+    t.name = "Задача 1: u = x^2 - y^2 + 2, lambda=1, q=0";
+    t.bc_left = "x=0: Дирихле  u = 2 - y^2";
+    t.bc_right = "x=1: Дирихле  u = 3 - y^2";
+    t.bc_bot = "y=0: Дирихле  u = x^2 + 2";
+    t.bc_top = "y=1: Нейман   -(du/dn) = 2";
+
+    t.lambda = [](double, double) { return 1.0; };
+    t.q_src = [](double, double) { return 0.0; };
+    t.u_exact = [](double x, double y) { return x * x - y * y + 2.0; };
+    // верхняя грань: нормаль (0,+1), du/dy = -2y => -(du/dn) = 2y, при y=1 => 2
+    t.q_neu = [](double, double y) { return 2.0 * y; };
+
+    t.boundary_table = [](const Mesh& m, double a, double b, double c, double d) {
+        std::vector<BC> bcs;
+        const double tol = 1e-10;
+        for (int i = 0; i < (int)m.nodes.size(); ++i) {
+            double x = m.nodes[i].x, y = m.nodes[i].y;
+            if (std::abs(x - a) < tol) bcs.push_back({ i, 1, x, y });
+            else if (std::abs(x - b) < tol) bcs.push_back({ i, 1, x, y });
+            else if (std::abs(y - c) < tol) bcs.push_back({ i, 1, x, y });
+            else if (std::abs(y - d) < tol) bcs.push_back({ i, 2, x, y });
+        }
+        return bcs;
+        };
+
+    t.test_tol = 5e-2; t.test_nx = 20; t.test_ny = 20;
+    return t;
 }
 
-const char* TASK_NAME = "Task 1: u = x^2 - y^2 + 2, lambda=1, q=0";
-const char* BC_DESC_LEFT = "x=0: Dirichlet  u = -y^2 + 2";
-const char* BC_DESC_RIGHT = "x=1: Dirichlet  u = 1 - y^2 + 2";
-const char* BC_DESC_BOT = "y=0: Dirichlet  u = x^2 + 2";
-const char* BC_DESC_TOP = "y=1: Neumann   -(du/dn) = 2";
-constexpr double TEST_TOL = 5e-2;
-
-#endif // TASK == 1
-
-// ================================================================
-// ЗАДАЧА 2
-//   lambda = x + y,
-//   q = -20*cos(5(x+y)) + 50*(x+y)*sin(5(x+y))
-//   u_exact = sin(5(x+y)) + 2
-//
-//   ГУ по граням:
-//     x=a=0 (левая):  тип 1,  u = sin(5y) + 2
-//     x=b=1 (правая): тип 2,  -(lambda*du/dn) = -(x+y)*5*cos(5(x+y))|_{x=1}
-//     y=c=0 (нижняя): тип 1,  u = sin(5x) + 2
-//     y=d=1 (верхняя):тип 2,  -(lambda*du/dn) = -(x+y)*5*cos(5(x+y))|_{y=1}
-// ================================================================
-
-#if TASK == 2
-
-double lambda_(double x, double y) { return x + y; }
-
-double q_src(double x, double y) {
-    double s = x + y;
-    return -20.0 * std::cos(5.0 * s) + 50.0 * s * std::sin(5.0 * s);
-}
-
-double u_exact(double x, double y) { return std::sin(5.0 * (x + y)) + 2.0; }
-double u_dir(double x, double y) { return u_exact(x, y); }
-
-// -(lambda * du/dn):
-//   du/dx = du/dy = 5*cos(5(x+y))
-//   правая грань  x=b=1: нормаль (+1,0), q = -(x+y)*5*cos(5(x+y))
-//   верхняя грань y=d=1: нормаль (0,+1), q = -(x+y)*5*cos(5(x+y))
-double q_neu(double x, double y) {
-    return -(x + y) * 5.0 * std::cos(5.0 * (x + y));
-}
-
-std::vector<BC> boundary_table(const Mesh& m,
-    double a, double b, double c, double d, double tol = 1e-10)
+// Задача 2: -div((x+y) grad u) = q,  u = sin(5(x+y)) + 2
+TaskDef make_task2()
 {
-    std::vector<BC> bcs;
-    for (int i = 0; i < (int)m.nodes.size(); ++i) {
-        double x = m.nodes[i].x, y = m.nodes[i].y;
-        bool left = std::abs(x - a) < tol;
-        bool right = std::abs(x - b) < tol;
-        bool bottom = std::abs(y - c) < tol;
-        bool top = std::abs(y - d) < tol;
-        if (left)   bcs.push_back({ i, 1, x, y });  // Дирихле
-        else if (right)  bcs.push_back({ i, 2, x, y });  // Нейман
-        else if (bottom) bcs.push_back({ i, 1, x, y });  // Дирихле
-        else if (top)    bcs.push_back({ i, 2, x, y });  // Нейман
-    }
-    return bcs;
+    TaskDef t;
+    t.name = "Задача 2: u = sin(5(x+y)) + 2, lambda=x+y";
+    t.bc_left = "x=0: Дирихле  u = sin(5y) + 2";
+    t.bc_right = "x=1: Нейман   -(lambda*du/dn) = -(x+y)*5*cos(5(x+y))";
+    t.bc_bot = "y=0: Дирихле  u = sin(5x) + 2";
+    t.bc_top = "y=1: Нейман   -(lambda*du/dn) = -(x+y)*5*cos(5(x+y))";
+
+    t.lambda = [](double x, double y) { return x + y; };
+    t.q_src = [](double x, double y) {
+        double s = x + y;
+        return -10.0 * std::cos(5.0 * s) + 50.0 * s * std::sin(5.0 * s);
+        };
+    t.u_exact = [](double x, double y) { return std::sin(5.0 * (x + y)) + 2.0; };
+    t.q_neu = [](double x, double y) { return -(x + y) * 5.0 * std::cos(5.0 * (x + y)); };
+
+    t.boundary_table = [](const Mesh& m, double a, double b, double c, double d) {
+        std::vector<BC> bcs;
+        const double tol = 1e-10;
+        for (int i = 0; i < (int)m.nodes.size(); ++i) {
+            double x = m.nodes[i].x, y = m.nodes[i].y;
+            if (std::abs(x - a) < tol) bcs.push_back({ i, 1, x, y });
+            else if (std::abs(x - b) < tol) bcs.push_back({ i, 2, x, y });
+            else if (std::abs(y - c) < tol) bcs.push_back({ i, 1, x, y });
+            else if (std::abs(y - d) < tol) bcs.push_back({ i, 2, x, y });
+        }
+        return bcs;
+        };
+
+    t.test_tol = 1e-1; t.test_nx = 20; t.test_ny = 20;
+    return t;
 }
 
-const char* TASK_NAME = "Task 2: u = sin(5(x+y)) + 2, lambda=x+y";
-const char* BC_DESC_LEFT = "x=0: Dirichlet  u = sin(5y) + 2";
-const char* BC_DESC_RIGHT = "x=1: Neumann   -(lambda*du/dn) = -(x+y)*5*cos(5(x+y))";
-const char* BC_DESC_BOT = "y=0: Dirichlet  u = sin(5x) + 2";
-const char* BC_DESC_TOP = "y=1: Neumann   -(lambda*du/dn) = -(x+y)*5*cos(5(x+y))";
-constexpr double TEST_TOL = 1e-1;
-
-#endif // TASK == 2
-
-// ---- разреженная матрица ----
+// ---- матрица жёсткости (DOK) ----
 
 struct DokMatrix {
     int n;
     std::map<std::pair<int, int>, double> data;
     explicit DokMatrix(int sz) : n(sz) {}
-    void add(int i, int j, double v) { data[{i, j}] += v; }
-    void set(int i, int j, double v) { data[{i, j}] = v; }
+    void   add(int i, int j, double v) { data[{i, j}] += v; }
     double get(int i, int j) const {
         auto it = data.find({ i,j });
         return it != data.end() ? it->second : 0.0;
     }
 };
 
-struct CsrMatrix {
-    int n = 0;
-    std::vector<double> val;
-    std::vector<int> col, row;
-    std::vector<double> mv(const std::vector<double>& x) const {
-        std::vector<double> y(n, 0.0);
-        for (int i = 0; i < n; ++i)
-            for (int k = row[i]; k < row[i + 1]; ++k)
-                y[i] += val[k] * x[col[k]];
-        return y;
-    }
-};
+// ---- метод Гаусса с выбором главного элемента ----
 
-CsrMatrix to_csr(const DokMatrix& d)
+std::vector<double> gauss(std::vector<std::vector<double>> a)
 {
-    CsrMatrix c; c.n = d.n;
-    c.row.resize(d.n + 1, 0);
-    for (auto& [k, v] : d.data) c.row[k.first + 1]++;
-    for (int i = 0; i < d.n; ++i) c.row[i + 1] += c.row[i];
-    int nnz = c.row[d.n];
-    c.val.resize(nnz); c.col.resize(nnz);
-    std::vector<int> pos(c.row.begin(), c.row.end());
-    for (auto& [k, v] : d.data) {
-        int p = pos[k.first]++;
-        c.val[p] = v; c.col[p] = k.second;
+    int n = (int)a.size();
+    for (int col = 0; col < n; ++col) {
+        int pivot = col;
+        for (int row = col + 1; row < n; ++row)
+            if (std::abs(a[row][col]) > std::abs(a[pivot][col])) pivot = row;
+        if (std::abs(a[pivot][col]) < 1e-15)
+            throw std::runtime_error("gauss: вырожденная матрица");
+        if (pivot != col) std::swap(a[col], a[pivot]);
+
+        double inv = 1.0 / a[col][col];
+        for (int row = col + 1; row < n; ++row) {
+            double f = a[row][col] * inv;
+            if (std::abs(f) < 1e-15) { a[row][col] = 0.0; continue; }
+            for (int k = col; k <= n; ++k)
+                a[row][k] -= f * a[col][k];
+        }
     }
-    return c;
-}
-
-static double dot(const std::vector<double>& a, const std::vector<double>& b) {
-    double s = 0; for (size_t i = 0; i < a.size(); ++i) s += a[i] * b[i]; return s;
-}
-
-std::vector<double> pcg(const CsrMatrix& A,
-    const std::vector<double>& b, double tol = 1e-10, int maxit = 200000)
-{
-    int n = A.n;
-    std::vector<double> Minv(n, 1.0);
-    for (int i = 0; i < n; ++i)
-        for (int k = A.row[i]; k < A.row[i + 1]; ++k)
-            if (A.col[k] == i && std::abs(A.val[k]) > 1e-300)
-                Minv[i] = 1.0 / A.val[k];
-
-    std::vector<double> x(n, 0.0), r = b, z(n), p(n);
-    for (int i = 0; i < n; ++i) z[i] = Minv[i] * r[i];
-    p = z;
-    double rz = dot(r, z), bn = std::sqrt(dot(b, b));
-    if (bn < 1e-300) return x;
-
-    for (int it = 0; it < maxit; ++it) {
-        auto Ap = A.mv(p);
-        double pAp = dot(p, Ap);
-        if (std::abs(pAp) < 1e-300) break;
-        double alpha = rz / pAp;
-        for (int i = 0; i < n; ++i) { x[i] += alpha * p[i]; r[i] -= alpha * Ap[i]; }
-        if (std::sqrt(dot(r, r)) < tol * bn) break;
-        for (int i = 0; i < n; ++i) z[i] = Minv[i] * r[i];
-        double rz2 = dot(r, z), beta = rz2 / rz;
-        for (int i = 0; i < n; ++i) p[i] = z[i] + beta * p[i];
-        rz = rz2;
+    std::vector<double> x(n);
+    for (int i = n - 1; i >= 0; --i) {
+        double s = a[i][n];
+        for (int j = i + 1; j < n; ++j) s -= a[i][j] * x[j];
+        x[i] = s / a[i][i];
     }
     return x;
 }
 
-// ---- МКЭ ----
+std::vector<double> solve_gauss(const DokMatrix& K, const std::vector<double>& F)
+{
+    int n = K.n;
+    std::vector<std::vector<double>> a(n, std::vector<double>(n + 1, 0.0));
+    for (auto& [key, v] : K.data) a[key.first][key.second] = v;
+    for (int i = 0; i < n; ++i) a[i][n] = F[i];
+    return gauss(std::move(a));
+}
+
+// ---- сборка СЛАУ ----
 
 struct Ke { double K[3][3]; double F[3]; };
 
@@ -252,8 +181,8 @@ Ke local_matrix(const std::array<Node, 3>& p,
     double S = std::abs(D) / 2.0;
     if (S < 1e-15) return ke;
 
-    double b[3] = { (y2 - y3) / D,(y3 - y1) / D,(y1 - y2) / D };
-    double c[3] = { (x3 - x2) / D,(x1 - x3) / D,(x2 - x1) / D };
+    double b[3] = { (y2 - y3) / D, (y3 - y1) / D, (y1 - y2) / D };
+    double c[3] = { (x3 - x2) / D, (x1 - x3) / D, (x2 - x1) / D };
     double la = (lam[0] + lam[1] + lam[2]) / 3.0;
     double qa = (q[0] + q[1] + q[2]) / 3.0;
 
@@ -271,7 +200,7 @@ void assemble(const Mesh& mesh,
     for (auto& el : mesh.elems) {
         std::array<Node, 3>   xy{ mesh.nodes[el.n[0]], mesh.nodes[el.n[1]], mesh.nodes[el.n[2]] };
         std::array<double, 3> la{ lam[el.n[0]], lam[el.n[1]], lam[el.n[2]] };
-        std::array<double, 3> qe{ qv[el.n[0]], qv[el.n[1]], qv[el.n[2]] };
+        std::array<double, 3> qe{ qv[el.n[0]],  qv[el.n[1]],  qv[el.n[2]] };
         auto ke = local_matrix(xy, la, qe);
         for (int a = 0; a < 3; ++a) {
             F[el.n[a]] += ke.F[a];
@@ -280,26 +209,29 @@ void assemble(const Mesh& mesh,
     }
 }
 
-void apply_dirichlet(DokMatrix& K, std::vector<double>& F,
-    const std::vector<std::pair<int, double>>& dbc)
+// ---- граничные условия ----
+
+// ГУ 1-го рода (Дирихле): метод штрафа
+//   K[node][node] += alpha,  F[node] += alpha * u_bc
+// Штраф 1e6: компромисс между точностью ГУ и обусловленностью матрицы.
+// При больших штрафах (1e10+) метод Гаусса теряет точность на сетках от 10x10.
+const double PENALTY = 1e6;
+
+void BC1(int node, double u_bc, DokMatrix& K, std::vector<double>& F)
 {
-    std::map<int, double> m(dbc.begin(), dbc.end());
-    for (auto& [key, v] : K.data) {
-        int i = key.first, j = key.second;
-        if (m.count(j) && !m.count(i)) F[i] -= v * m[j];
-    }
-    std::vector<std::pair<int, int>> rm;
-    for (auto& [key, v] : K.data)
-        if (m.count(key.first) || m.count(key.second)) rm.push_back(key);
-    for (auto& k : rm) K.data.erase(k);
-    for (auto& [idx, u] : m) { K.set(idx, idx, 1.0); F[idx] = u; }
+    K.add(node, node, PENALTY);
+    F[node] += PENALTY * u_bc;
 }
 
-void apply_neumann(const Mesh& mesh, const std::vector<BC>& bcs,
-    std::vector<double>& F, std::function<double(double, double)> q0)
+// ГУ 2-го рода (Нейман): интегрирование потока по граничным рёбрам
+//   F[i] -= L*(2*qi + qj)/6,  F[j] -= L*(qi + 2*qj)/6
+void BC2(const Mesh& mesh, const std::vector<BC>& bcs,
+    std::vector<double>& F,
+    const std::function<double(double, double)>& q_neu)
 {
     std::map<int, bool> neu;
-    for (auto& bc : bcs) if (bc.type == 2) neu[bc.node] = true;
+    for (auto& bc : bcs)
+        if (bc.type == 2) neu[bc.node] = true;
 
     std::map<std::pair<int, int>, int> ecnt;
     for (auto& el : mesh.elems)
@@ -313,174 +245,122 @@ void apply_neumann(const Mesh& mesh, const std::vector<BC>& bcs,
         if (cnt != 1) continue;
         int i = e.first, j = e.second;
         if (!neu.count(i) || !neu.count(j)) continue;
+
         double xi = mesh.nodes[i].x, yi = mesh.nodes[i].y;
         double xj = mesh.nodes[j].x, yj = mesh.nodes[j].y;
         double L = std::sqrt((xj - xi) * (xj - xi) + (yj - yi) * (yj - yi));
-        double qi = q0(xi, yi), qj = q0(xj, yj);
-        F[i] -= L * (2 * qi + qj) / 6.0;
-        F[j] -= L * (qi + 2 * qj) / 6.0;
+        double qi = q_neu(xi, yi), qj = q_neu(xj, yj);
+        F[i] -= L * (2.0 * qi + qj) / 6.0;
+        F[j] -= L * (qi + 2.0 * qj) / 6.0;
     }
 }
 
-// ---- вывод ----
+// ---- решение задачи ----
 
-void write_csv(const std::string& fname, const Mesh& mesh, const std::vector<double>& u)
-{
-    std::ofstream f(fname);
-    if (!f) throw std::runtime_error("failed to open " + fname);
-    f << "x,y,u\n" << std::fixed << std::setprecision(10);
-    for (int i = 0; i < (int)mesh.nodes.size(); ++i)
-        f << mesh.nodes[i].x << ',' << mesh.nodes[i].y << ',' << u[i] << '\n';
-}
-
-void write_vtk(const std::string& fname, const Mesh& mesh, const std::vector<double>& u)
-{
-    std::ofstream f(fname);
-    if (!f) throw std::runtime_error("failed to open " + fname);
-    int nn = (int)mesh.nodes.size(), ne = (int)mesh.elems.size();
-    f << "# vtk DataFile Version 3.0\nFEM\nASCII\nDATASET UNSTRUCTURED_GRID\n";
-    f << "POINTS " << nn << " double\n" << std::fixed << std::setprecision(8);
-    for (auto& nd : mesh.nodes) f << nd.x << ' ' << nd.y << " 0\n";
-    f << "\nCELLS " << ne << ' ' << 4 * ne << '\n';
-    for (auto& el : mesh.elems)
-        f << "3 " << el.n[0] << ' ' << el.n[1] << ' ' << el.n[2] << '\n';
-    f << "\nCELL_TYPES " << ne << '\n';
-    for (int i = 0; i < ne; ++i) f << "5\n";
-    f << "\nPOINT_DATA " << nn << "\nSCALARS u double 1\nLOOKUP_TABLE default\n";
-    for (int i = 0; i < nn; ++i) f << u[i] << '\n';
-}
-
-void write_txt(const std::string& fname, const Mesh& mesh,
-    const std::vector<double>& u,
-    double a, double b, double c, double d,
-    int nx, int ny)
-{
-    std::ofstream f(fname);
-    if (!f) throw std::runtime_error("failed to open " + fname);
-
-    f << "================================================\n";
-    f << "  " << TASK_NAME << "\n";
-    f << "  Equation: div(lambda * grad(u)) + q = 0\n";
-    f << "================================================\n\n";
-
-    f << "Domain:   [" << a << ", " << b << "] x [" << c << ", " << d << "]\n";
-    f << "Mesh:     " << nx << " x " << ny << "\n";
-    f << "Nodes:    " << mesh.nodes.size() << "\n";
-    f << "Elements: " << mesh.elems.size() << "\n\n";
-
-    double umin = *std::min_element(u.begin(), u.end());
-    double umax = *std::max_element(u.begin(), u.end());
-    double uavg = 0; for (auto v : u) uavg += v; uavg /= u.size();
-
-    f << std::fixed << std::setprecision(6);
-    f << "u_min = " << umin << "\n";
-    f << "u_max = " << umax << "\n";
-    f << "u_avg = " << uavg << "\n\n";
-
-    f << "Boundary conditions:\n";
-    f << "  " << BC_DESC_LEFT << "\n";
-    f << "  " << BC_DESC_RIGHT << "\n";
-    f << "  " << BC_DESC_BOT << "\n";
-    f << "  " << BC_DESC_TOP << "\n\n";
-
-    f << "------------------------------------------------\n";
-    f << "  Node       x           y           u\n";
-    f << "------------------------------------------------\n";
-    f << std::fixed << std::setprecision(8);
-    for (int i = 0; i < (int)mesh.nodes.size(); ++i)
-        f << "  " << std::setw(5) << i
-        << "  " << std::setw(10) << mesh.nodes[i].x
-        << "  " << std::setw(10) << mesh.nodes[i].y
-        << "  " << std::setw(12) << u[i] << "\n";
-    f << "------------------------------------------------\n";
-}
-
-// ---- решение ----
-
-std::vector<double> solve(const Mesh& mesh, double a, double b, double c, double d)
+std::vector<double> solve_task(const TaskDef& task, const Mesh& mesh,
+    double a, double b, double c, double d)
 {
     int N = (int)mesh.nodes.size();
     std::vector<double> lam(N), qv(N);
     for (int i = 0; i < N; ++i) {
-        lam[i] = lambda_(mesh.nodes[i].x, mesh.nodes[i].y);
-        qv[i] = q_src(mesh.nodes[i].x, mesh.nodes[i].y);
+        lam[i] = task.lambda(mesh.nodes[i].x, mesh.nodes[i].y);
+        qv[i] = task.q_src(mesh.nodes[i].x, mesh.nodes[i].y);
     }
+
     DokMatrix K(N);
     std::vector<double> F(N, 0.0);
     assemble(mesh, lam, qv, K, F);
 
-    auto bcs = boundary_table(mesh, a, b, c, d);
-    apply_neumann(mesh, bcs, F, q_neu);
-
-    std::vector<std::pair<int, double>> dbc;
+    auto bcs = task.boundary_table(mesh, a, b, c, d);
+    BC2(mesh, bcs, F, task.q_neu);
     for (auto& bc : bcs)
-        if (bc.type == 1) dbc.push_back({ bc.node, u_dir(bc.x,bc.y) });
-    apply_dirichlet(K, F, dbc);
+        if (bc.type == 1) BC1(bc.node, task.u_exact(bc.x, bc.y), K, F);
 
-    return pcg(to_csr(K), F);
+    return solve_gauss(K, F);
 }
 
-bool run_test()
+// ---- тест ----
+
+bool run_test(const TaskDef& task, double a, double b, double c, double d)
 {
-    double a = 0, b = 1, c = 0, d = 1;
-#if TASK == 1
-    Mesh mesh = make_mesh(a, b, c, d, 20, 20);
-#else
-    Mesh mesh = make_mesh(a, b, c, d, 60, 60); // задача 2: мельче сетка из-за осцилляций
-#endif
-    int N = (int)mesh.nodes.size();
+    Mesh mesh = make_mesh(a, b, c, d, task.test_nx, task.test_ny);
+    auto u = solve_task(task, mesh, a, b, c, d);
 
-    std::vector<double> lam(N), qv(N);
-    for (int i = 0; i < N; ++i) {
-        lam[i] = lambda_(mesh.nodes[i].x, mesh.nodes[i].y);
-        qv[i] = q_src(mesh.nodes[i].x, mesh.nodes[i].y);
-    }
-    DokMatrix K(N); std::vector<double> F(N, 0.0);
-    assemble(mesh, lam, qv, K, F);
+    double err = 0.0;
+    for (int i = 0; i < (int)mesh.nodes.size(); ++i)
+        err = std::max(err, std::abs(u[i] - task.u_exact(mesh.nodes[i].x, mesh.nodes[i].y)));
 
-    auto bcs = boundary_table(mesh, a, b, c, d);
-    apply_neumann(mesh, bcs, F, q_neu);
-
-    std::vector<std::pair<int, double>> dbc;
-    const double tol = 1e-10;
-    (void)tol;
-    for (auto& bc : bcs)
-        if (bc.type == 1) dbc.push_back({ bc.node, u_exact(bc.x,bc.y) });
-    apply_dirichlet(K, F, dbc);
-
-    auto u = pcg(to_csr(K), F);
-
-    double err = 0;
-    for (int i = 0; i < N; ++i)
-        err = std::max(err, std::abs(u[i] - u_exact(mesh.nodes[i].x, mesh.nodes[i].y)));
-
-    std::cout << std::scientific << std::setprecision(2);
-    std::cout << "test [" << TASK_NAME << "]:  max error = " << err
-        << (err < TEST_TOL ? "  ok\n" : "  FAIL\n");
-    return err < TEST_TOL;
+    std::cout << std::scientific << std::setprecision(2)
+        << task.name << ": погрешность = " << err
+        << (err < task.test_tol ? "  ok\n" : "  FAIL\n");
+    return err < task.test_tol;
 }
 
-int main()
+// ---- вывод ----
+
+void write_txt(const std::string& fname, const TaskDef& task, const Mesh& mesh,
+    const std::vector<double>& u,
+    double a, double b, double c, double d, int nx, int ny)
 {
-
-    std::cout << "Running " << TASK_NAME << "\n";
-    if (!run_test()) return 1;
-
-    double a = 0, b = 1, c = 0, d = 1;
-    int nx = 40, ny = 40;
-    std::cout << "mesh " << nx << "x" << ny << "\n";
-
-    Mesh mesh = make_mesh(a, b, c, d, nx, ny);
-    auto u = solve(mesh, a, b, c, d);
+    std::ofstream f(fname);
+    if (!f) throw std::runtime_error("не удалось открыть " + fname);
 
     double umin = *std::min_element(u.begin(), u.end());
     double umax = *std::max_element(u.begin(), u.end());
-    std::cout << std::fixed << std::setprecision(4);
-    std::cout << "u: [" << umin << ", " << umax << "]\n";
+    double uavg = 0.0;
+    for (double v : u) uavg += v;
+    uavg /= u.size();
 
-    write_csv("lab1_result.csv", mesh, u);
-    write_vtk("lab1_result.vtk", mesh, u);
-    write_txt("lab1_result.txt", mesh, u, a, b, c, d, nx, ny);
-    std::cout << "written: lab1_result.csv, lab1_result.vtk, lab1_result.txt\n";
+    f << task.name << "\n"
+        << "Область: [" << a << "," << b << "] x [" << c << "," << d << "]\n"
+        << "Сетка: " << nx << "x" << ny
+        << "  узлов: " << mesh.nodes.size()
+        << "  элементов: " << mesh.elems.size() << "\n"
+        << "ГУ:\n"
+        << "  " << task.bc_left << "\n"
+        << "  " << task.bc_right << "\n"
+        << "  " << task.bc_bot << "\n"
+        << "  " << task.bc_top << "\n"
+        << std::fixed << std::setprecision(6)
+        << "u_min=" << umin << "  u_max=" << umax << "  u_avg=" << uavg << "\n\n";
+
+    f << std::setw(6) << "узел"
+        << std::setw(14) << "x"
+        << std::setw(14) << "y"
+        << std::setw(16) << "u" << "\n";
+    f << std::fixed << std::setprecision(8);
+    for (int i = 0; i < (int)mesh.nodes.size(); ++i)
+        f << std::setw(6) << i
+        << std::setw(14) << mesh.nodes[i].x
+        << std::setw(14) << mesh.nodes[i].y
+        << std::setw(16) << u[i] << "\n";
+}
+
+// ---- main ----
+
+int main()
+{
+    const double a = 0.0, b = 1.0, c = 0.0, d = 1.0;
+    const int nx = 15, ny = 15;
+
+    TaskDef tasks[2] = { make_task1(), make_task2() };
+
+    for (auto& task : tasks)
+        if (!run_test(task, a, b, c, d)) return 1;
+
+    for (int t = 0; t < 2; ++t) {
+        auto& task = tasks[t];
+        Mesh mesh = make_mesh(a, b, c, d, nx, ny);
+        auto u = solve_task(task, mesh, a, b, c, d);
+
+        double umin = *std::min_element(u.begin(), u.end());
+        double umax = *std::max_element(u.begin(), u.end());
+        std::cout << std::fixed << std::setprecision(4)
+            << task.name << "\n  u: [" << umin << ", " << umax << "]\n";
+
+        std::string fname = "result_task" + std::to_string(t + 1) + ".txt";
+        write_txt(fname, task, mesh, u, a, b, c, d, nx, ny);
+        std::cout << "  -> " << fname << "\n";
+    }
     return 0;
 }
