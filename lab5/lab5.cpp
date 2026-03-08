@@ -229,10 +229,8 @@ std::vector<int> cuthill_mckee(int start, const StaticAdjacency& sa) {
             [&](int a, int b) { return degree(a) < degree(b); });
 
         for (int nb : neighbors) {
-            if (!visited[nb]) {
-                visited[nb] = true;
-                order.push_back(nb);
-            }
+            visited[nb] = true;
+            order.push_back(nb);
         }
     }
     return order;

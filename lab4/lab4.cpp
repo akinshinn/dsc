@@ -248,7 +248,7 @@ int main() {
     StaticAdjacency sa = build_static_adjacency(dyn_adj);
 
     // Поиск начального узла
-    std::cout << "Поиск псевдопериферийного узла (алгоритм Джорджа-Лю):\n";
+    std::cout << "Поиск псевдопериферийного узла (алгоритм Джорджа—Лю):\n";
     int start = find_starting_node(sa);
 
     std::cout << "\nНайденный начальный узел: " << start
