@@ -27,7 +27,7 @@
 struct Node { double x, y; };
 
 struct Element {
-    std::vector<int> nodes; // номера узлов элемента (3 или 4)
+    std::vector<int> nodes; // номера узлов элемента (3 для треугольников, 4 для четырёхугольников)
 };
 
 struct Mesh {
