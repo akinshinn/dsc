@@ -4,6 +4,11 @@
  * Программа считывает сетку из файла, строит структуру смежности,
  * затем выполняет обход в ширину (BFS) от заданного узла
  * и формирует корневую структуру уровней.
+ * Поддерживаются типы сеток из ЛР3 (Семестр 1):
+ *   тип 1 — четырёхугольные элементы (4 узла)
+ *   тип 2 — треугольные, диагональ /  (3 узла)
+ *   тип 3 — треугольные, диагональ \  (3 узла)
+ *   тип 4 — треугольные, 4 треугольника через центр (3 узла)
  * Результат выводится в файл.
  */
 
@@ -14,15 +19,19 @@
 #include <queue>
 #include <string>
 #include <iomanip>
+#include <algorithm>
 
 // ---- Структуры данных (из ЛР2) ----
 
 struct Node { double x, y; };
-struct Triangle { int n[3]; };
+
+struct Element {
+    std::vector<int> nodes;
+};
 
 struct Mesh {
-    std::vector<Node> nodes;
-    std::vector<Triangle> elems;
+    std::vector<Node>    nodes;
+    std::vector<Element> elems;
 };
 
 struct StaticAdjacency {
@@ -32,14 +41,15 @@ struct StaticAdjacency {
 
 // ---- Генерация сетки (из ЛР2) ----
 
-Mesh generate_quad_mesh(int nx, int ny) {
+Mesh generate_quad_mesh(int nx, int ny, int type = 2) {
     Mesh m;
     double x0 = 0, y0 = 0;
     double x1 = 10, y1 = 0;
     double x2 = 8, y2 = 10;
     double x3 = 0, y3 = 7;
 
-    m.nodes.resize((nx + 1) * (ny + 1));
+    int base_nodes = (nx + 1) * (ny + 1);
+    m.nodes.resize(base_nodes);
     for (int j = 0; j <= ny; ++j) {
         double t = (double)j / ny;
         for (int i = 0; i <= nx; ++i) {
@@ -52,14 +62,42 @@ Mesh generate_quad_mesh(int nx, int ny) {
         }
     }
 
+    if (type == 4) {
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i) {
+                int n0 = j * (nx + 1) + i, n1 = n0 + 1;
+                int n2 = n0 + (nx + 1), n3 = n2 + 1;
+                double cx = (m.nodes[n0].x + m.nodes[n1].x +
+                             m.nodes[n2].x + m.nodes[n3].x) / 4.0;
+                double cy = (m.nodes[n0].y + m.nodes[n1].y +
+                             m.nodes[n2].y + m.nodes[n3].y) / 4.0;
+                m.nodes.push_back({cx, cy});
+            }
+    }
+
     for (int j = 0; j < ny; ++j)
         for (int i = 0; i < nx; ++i) {
-            int n0 = j * (nx + 1) + i;
-            int n1 = n0 + 1;
-            int n2 = n0 + (nx + 1);
-            int n3 = n2 + 1;
-            m.elems.push_back({{n0, n1, n3}});
-            m.elems.push_back({{n0, n3, n2}});
+            int n0 = j * (nx + 1) + i, n1 = n0 + 1;
+            int n2 = n0 + (nx + 1), n3 = n2 + 1;
+            switch (type) {
+            case 1: m.elems.push_back({{n0, n1, n3, n2}}); break;
+            case 2:
+                m.elems.push_back({{n0, n1, n3}});
+                m.elems.push_back({{n0, n3, n2}});
+                break;
+            case 3:
+                m.elems.push_back({{n0, n1, n2}});
+                m.elems.push_back({{n1, n3, n2}});
+                break;
+            case 4: {
+                int nc = base_nodes + j * nx + i;
+                m.elems.push_back({{n0, n1, nc}});
+                m.elems.push_back({{n1, n3, nc}});
+                m.elems.push_back({{n3, n2, nc}});
+                m.elems.push_back({{n2, n0, nc}});
+                break;
+            }
+            }
         }
     return m;
 }
@@ -73,8 +111,11 @@ void write_mesh(const std::string& fname, const Mesh& m) {
     for (auto& nd : m.nodes)
         f << nd.x << " " << nd.y << "\n";
     f << m.elems.size() << "\n";
-    for (auto& el : m.elems)
-        f << el.n[0] << " " << el.n[1] << " " << el.n[2] << "\n";
+    for (auto& el : m.elems) {
+        f << el.nodes.size();
+        for (int nd : el.nodes) f << " " << nd;
+        f << "\n";
+    }
 }
 
 Mesh read_mesh(const std::string& fname) {
@@ -90,8 +131,12 @@ Mesh read_mesh(const std::string& fname) {
         f >> m.nodes[i].x >> m.nodes[i].y;
     int ne; f >> ne;
     m.elems.resize(ne);
-    for (int i = 0; i < ne; ++i)
-        f >> m.elems[i].n[0] >> m.elems[i].n[1] >> m.elems[i].n[2];
+    for (int i = 0; i < ne; ++i) {
+        int np; f >> np;
+        m.elems[i].nodes.resize(np);
+        for (int j = 0; j < np; ++j)
+            f >> m.elems[i].nodes[j];
+    }
     return m;
 }
 
@@ -100,12 +145,14 @@ Mesh read_mesh(const std::string& fname) {
 std::vector<std::set<int>> build_dynamic_adjacency(const Mesh& m) {
     int n = (int)m.nodes.size();
     std::vector<std::set<int>> adj(n);
-    for (auto& el : m.elems)
-        for (int i = 0; i < 3; ++i)
-            for (int j = i + 1; j < 3; ++j) {
-                adj[el.n[i]].insert(el.n[j]);
-                adj[el.n[j]].insert(el.n[i]);
+    for (auto& el : m.elems) {
+        int np = (int)el.nodes.size();
+        for (int i = 0; i < np; ++i)
+            for (int j = i + 1; j < np; ++j) {
+                adj[el.nodes[i]].insert(el.nodes[j]);
+                adj[el.nodes[j]].insert(el.nodes[i]);
             }
+    }
     return adj;
 }
 
@@ -129,8 +176,8 @@ StaticAdjacency build_static_adjacency(const std::vector<std::set<int>>& dyn) {
 
 struct LevelStructure {
     int root;
-    std::vector<std::vector<int>> levels; // levels[k] — узлы уровня k
-    std::vector<int> level_of;            // level_of[i] — номер уровня узла i
+    std::vector<std::vector<int>> levels;
+    std::vector<int> level_of;
 };
 
 LevelStructure build_level_structure(int root, const StaticAdjacency& sa) {
@@ -147,12 +194,10 @@ LevelStructure build_level_structure(int root, const StaticAdjacency& sa) {
         int v = q.front(); q.pop();
         int lv = ls.level_of[v];
 
-        // Добавляем новый уровень при необходимости
         if (lv >= (int)ls.levels.size())
             ls.levels.resize(lv + 1);
         ls.levels[lv].push_back(v);
 
-        // Обход соседей
         for (int k = sa.xadj[v]; k < sa.xadj[v + 1]; ++k) {
             int nb = sa.adjncy[k];
             if (ls.level_of[nb] == -1) {
@@ -182,24 +227,38 @@ void write_level_structure(const std::string& fname, const LevelStructure& ls) {
     std::cout << "Структура уровней записана в " << fname << "\n";
 }
 
+// ---- Название типа сетки ----
+
+const char* mesh_type_name(int type) {
+    switch (type) {
+    case 1: return "четырёхугольники";
+    case 2: return "треугольники (диагональ /)";
+    case 3: return "треугольники (диагональ \\)";
+    case 4: return "треугольники (4 через центр)";
+    default: return "неизвестный";
+    }
+}
+
 // ---- Главная функция ----
 
 int main() {
     std::cout << "=== ЛР3: Построение корневой структуры уровней ===\n\n";
 
-    // Генерация и сохранение сетки
     int nx = 15, ny = 10;
-    Mesh mesh = generate_quad_mesh(nx, ny);
+    int type = 2;
+
+    Mesh mesh = generate_quad_mesh(nx, ny, type);
     write_mesh("mesh.txt", mesh);
     std::cout << "Сетка: " << mesh.nodes.size() << " узлов, "
-              << mesh.elems.size() << " элементов\n";
+              << mesh.elems.size() << " элементов"
+              << ", тип " << type << " (" << mesh_type_name(type) << ")\n";
 
     // Построение структуры смежности
     auto dyn_adj = build_dynamic_adjacency(mesh);
     StaticAdjacency sa = build_static_adjacency(dyn_adj);
     std::cout << "Структура смежности построена\n";
 
-    // Построение корневой структуры уровней от узла 0 (нумерация с 0)
+    // Построение корневой структуры уровней от узла 0
     int root = 0;
     std::cout << "\nПостроение структуры уровней от узла " << root << "...\n";
     LevelStructure ls = build_level_structure(root, sa);
