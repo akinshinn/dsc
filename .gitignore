@@ -1,0 +1,27 @@
+# Build artifacts
+*.o
+*.obj
+*.exe
+*.out
+*.ilk
+*.pdb
+*.idb
+*.log
+
+# Visual Studio
+.vs/
+x64/
+Debug/
+Release/
+*.tlog/
+*.ipch
+*.suo
+*.user
+
+# Output files
+*.csv
+*.vtk
+
+# OS files
+.DS_Store
+Thumbs.db
